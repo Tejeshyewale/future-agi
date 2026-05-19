@@ -430,8 +430,8 @@ const TestEvaluationPage = ({
         open={openConfirmDialog}
         onClose={() => setOpenConfirmDialog(false)}
         onConfirm={() => {}}
-        title="Confirm Delete eval"
-        message="Are you sure you want to proceed?"
+        title="Delete Evaluation"
+        content="This will also remove all its results. This action cannot be undone."
         action={
           <LoadingButton
             variant="contained"

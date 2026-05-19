@@ -137,7 +137,7 @@ const TestEvaluationDrawer = ({ executionIds, onSuccessOfAdditionOfEvals }) => {
       <Drawer
         anchor="right"
         open={openTestEvaluation}
-              variant="persistent"
+              variant={onSuccessOfAdditionOfEvals?"temporary":"persistent"}
         onClose={onCloseHandler}
         PaperProps={{
           sx: (theme) => ({
