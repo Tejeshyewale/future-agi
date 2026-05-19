@@ -96,6 +96,19 @@ const SOURCE_LABELS = {
   composite: "Composite",
 };
 
+const SOURCE_NAME_SLUGS = {
+  dataset: "dataset",
+  experiment: "experiment",
+  "run-experiment": "experiment",
+  optimization: "optimization",
+  "run-optimization": "optimization",
+  workbench: "workbench",
+  simulation: "simulation",
+  "create-simulate": "simulation",
+  task: "task",
+  composite: "composite",
+};
+
 const getEvalPromptText = (evalData, config = {}) =>
   evalData?.instructions || config?.rule_prompt || "";
 
@@ -261,18 +274,28 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
       [];
 
     if (evalType === "code") {
-      // Live-parse the user's `def evaluate(...)` signature so adding /
-      // renaming a parameter immediately surfaces a new mapping row.
-      // Fall back to the saved mapping + template required_keys when the
-      // code can't be parsed (non-python language, no `def evaluate`).
-      const liveParams = extractCodeEvaluateParams(code, codeLanguage);
-      if (liveParams.length > 0) {
-        return [...new Set([...liveParams, ...requiredKeys])];
-      }
       const savedMapping = normalizedEvalData?.mapping || {};
       const savedStdvars = ["input", "output", "expected"].filter(
         (v) => v in savedMapping,
       );
+
+      // System code evals always have the canonical
+      // `evaluate(input, output, expected, context, **kwargs)` signature —
+      // the real keys live in required_keys, so trust them directly and
+      // never live-parse (would surface input/output/expected/context).
+      if (isSystemEval) {
+        if (requiredKeys.length > 0) return [...new Set(requiredKeys)];
+        return savedStdvars;
+      }
+
+      // User-authored code: live-parse the `def evaluate(...)` signature
+      // so adding / renaming a param immediately surfaces a mapping row.
+      // Fall back to saved mapping + template required_keys when the code
+      // can't be parsed (non-python language, no `def evaluate`).
+      const liveParams = extractCodeEvaluateParams(code, codeLanguage);
+      if (liveParams.length > 0) {
+        return [...new Set([...liveParams, ...requiredKeys])];
+      }
       return [...new Set([...savedStdvars, ...requiredKeys])];
     }
 
@@ -364,8 +387,8 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
         evalData?.config?.run_config ||
         evalData?.config?.runConfig ||
         {};
-        
-     const normalizedRunConfig = {
+
+      const normalizedRunConfig = {
         ...rawRunConfig,
         agent_mode:
           rawRunConfig.agent_mode ??
@@ -506,17 +529,21 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
           setContextOptions(["variables_only"]);
         }
       } else if (source === "task") {
-      const seeded = contextOptionsForRowType(sourceRowType);
+        const seeded = contextOptionsForRowType(sourceRowType);
         if (seeded) setContextOptions(seeded);
       }
       setErrorLocalizerEnabled(
         config.error_localizer_enabled ??
-          fullEval.error_localizer_enabled ??
-          false,
+        fullEval.error_localizer_enabled ??
+        false,
       );
 
       // Edit mode: keep the saved name. Create mode: generate a unique name
-      // from the template base name + current date (e.g. "is_good_summary_14_Apr_2026").
+      // from the template base name + source slug + date/time, e.g.
+      // "is_good_summary_dataset_14_may_2026_15_42". The source slug ties
+      // the name to where the eval was created (dataset / experiment /
+      // workbench / …); the timestamp avoids collisions on the backend
+      // uniqueness check for same-source same-day repeats.
       if (isEditMode) {
         setEvalName(evalData?.name || fullEval.name || "");
       } else {
@@ -526,8 +553,14 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
           .toLowerCase()
           .replace(/\s+/g, "_")
           .replace(/[^a-z0-9_-]/g, "");
-        const dateSuffix = format(new Date(), "dd_MMM_yyyy").toLowerCase();
-        setEvalName(`${sanitized}_${dateSuffix}`);
+        const sourceSlug = SOURCE_NAME_SLUGS[source] || "";
+        const stamp = format(new Date(), "dd_MMM_yyyy_HH_mm").toLowerCase();
+        const suffix = [sourceSlug, stamp].filter(Boolean).join("_");
+        const maxBaseLen = Math.max(0, 50 - suffix.length - (suffix ? 1 : 0));
+        const truncatedBase = sanitized.slice(0, maxBaseLen).replace(/_+$/, "");
+        setEvalName(
+          [truncatedBase, sourceSlug, stamp].filter(Boolean).join("_"),
+        );
       }
 
       initialLoadDone.current = true;
@@ -597,8 +630,8 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
         setUseInternet(fullEval.config?.check_internet ?? false);
         setErrorLocalizerEnabled(
           fullEval.error_localizer_enabled ??
-            fullEval.config?.error_localizer_enabled ??
-            false,
+          fullEval.config?.error_localizer_enabled ??
+          false,
         );
         setIsDirty(false);
         return;
@@ -804,13 +837,13 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
         );
         return;
       }
-    if (evalType === "llm" && !hasValidPromptMessages) {
-      const errorMessage = "Prompt message is required";
-      setPromptMessageError(errorMessage);
-      enqueueSnackbar(errorMessage, { variant: "error" });
-      return;
+      if (evalType === "llm" && !hasValidPromptMessages) {
+        const errorMessage = "Prompt message is required";
+        setPromptMessageError(errorMessage);
+        enqueueSnackbar(errorMessage, { variant: "error" });
+        return;
+      }
     }
-  }
 
     if (source === "task" && onFiltersChange) {
       onFiltersChange(localFilterForm.getValues("filters") || []);
@@ -1121,7 +1154,16 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
             setEvalName(raw);
             setIsDirty(true);
           }}
-          inputProps={{ maxLength: 60 }}
+          inputProps={{ maxLength: 50 }}
+          error={!isEditMode && evalName.length >= 50}
+          helperText={
+            isEditMode
+              ? undefined
+              : evalName.length >= 50
+                ? "Name can't be longer than 50 characters"
+                : `Use lowercase letters, numbers, hyphens (-) and underscores (_) only. ${evalName.length}/50`
+          }
+          FormHelperTextProps={{ sx: { fontSize: "11px", mt: 0.25, mx: 0 } }}
           sx={{ "& .MuiInputBase-root": { fontSize: "13px", height: 34 } }}
         />
       </Box>
@@ -1594,27 +1636,27 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
                   source === "workbench" ||
                   source === "run-experiment" ||
                   source === "run-optimization") && (
-                  <DatasetTestMode
-                    ref={sourceRef}
-                    templateId={templateId}
-                    variables={variables}
-                    model={model}
-                    codeParams={codeParams}
-                    onTestResult={handleTestResult}
-                    onClearResult={handleClearTestResult}
-                    onColumnsLoaded={handleColumnsLoaded}
-                    initialDatasetId={sourceId}
-                    onReadyChange={handleSourceReadyChange}
-                    contextOptions={contextOptions}
-                    errorLocalizerEnabled={errorLocalizerEnabled}
-                    initialMapping={evalData?.mapping}
-                    {...compositeSourceModeProps}
-                    sourceColumns={
-                      source === "workbench" ? sourceColumns : null
-                    }
-                    extraColumns={extraColumns}
-                  />
-                )}
+                    <DatasetTestMode
+                      ref={sourceRef}
+                      templateId={templateId}
+                      variables={variables}
+                      model={model}
+                      codeParams={codeParams}
+                      onTestResult={handleTestResult}
+                      onClearResult={handleClearTestResult}
+                      onColumnsLoaded={handleColumnsLoaded}
+                      initialDatasetId={sourceId}
+                      onReadyChange={handleSourceReadyChange}
+                      contextOptions={contextOptions}
+                      errorLocalizerEnabled={errorLocalizerEnabled}
+                      initialMapping={evalData?.mapping}
+                      {...compositeSourceModeProps}
+                      sourceColumns={
+                        source === "workbench" ? sourceColumns : null
+                      }
+                      extraColumns={extraColumns}
+                    />
+                  )}
                 {source === "tracing" && (
                   <TracingTestMode
                     ref={sourceRef}
@@ -1674,6 +1716,7 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
                     errorLocalizerEnabled={errorLocalizerEnabled}
                     localFilters={localApiFilters}
                     pickerSourceColumns={sourceColumns}
+                    allowCustomFieldPath
                     {...compositeSourceModeProps}
                   />
                 )}
@@ -1706,6 +1749,7 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
                     templateId={templateId}
                     instructions={evalType === "code" ? "" : instructions}
                     evalType={evalType}
+                    isSystemEval={isSystemEval}
                     requiredKeys={variables}
                     showVersions={!(isSystemEval && evalType === "code")}
                     onTestResult={handleTestResult}
@@ -1734,7 +1778,19 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
                         }
                         label={key}
                         value={codeParams[key] ?? ""}
-                        onChange={(e) => handleCodeParamChange(key, e.target.value)}
+                        onChange={(e) => {
+                          // BE's `type: number` schema rejects strings; coerce here.
+                          const raw = e.target.value;
+                          const isNumeric =
+                            schema?.type === "integer" ||
+                            schema?.type === "number";
+                          let next = raw;
+                          if (isNumeric && raw !== "") {
+                            const n = Number(raw);
+                            if (!Number.isNaN(n)) next = n;
+                          }
+                          handleCodeParamChange(key, next);
+                        }}
                         helperText={
                           configParamsDesc?.[key] || schema?.description || ""
                         }
@@ -1842,6 +1898,25 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
             if (!(code || "").trim()) {
               testDisabled = true;
               testDisabledReason = "Write some code before running a test.";
+            } else {
+              const missingRequiredParam = visibleCodeParamEntries.find(
+                ([key, schema]) => {
+                  if (!schema?.required) return false;
+                  if (schema.nullable) return false;
+                  if (schema.default !== null && schema.default !== undefined)
+                    return false;
+                  const v = codeParams[key];
+                  return (
+                    v === undefined ||
+                    v === null ||
+                    (typeof v === "string" && v.trim() === "")
+                  );
+                },
+              );
+              if (missingRequiredParam) {
+                testDisabled = true;
+                testDisabledReason = `Set ${missingRequiredParam[0]} before running a test.`;
+              }
             }
           } else if (!hasInstructions) {
             testDisabled = true;
@@ -1861,7 +1936,7 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
 
           return (
             <ShowComponent
-              condition={!hasDataInjection }
+              condition={!hasDataInjection}
             >
               <CustomTooltip
                 show={testDisabled && !!testDisabledReason}
@@ -1915,6 +1990,26 @@ const EvalPickerConfigFull = ({ evalData, onBack, onSave, isSaving }) => {
             if (!(code || "").trim()) {
               addDisabled = true;
               addDisabledReason = `Write some code before ${actionLabel}.`;
+            } else {
+              // Mirror BE's required-param check so the round-trip never happens.
+              const missingRequiredParam = visibleCodeParamEntries.find(
+                ([key, schema]) => {
+                  if (!schema?.required) return false;
+                  if (schema.nullable) return false;
+                  if (schema.default !== null && schema.default !== undefined)
+                    return false;
+                  const v = codeParams[key];
+                  return (
+                    v === undefined ||
+                    v === null ||
+                    (typeof v === "string" && v.trim() === "")
+                  );
+                },
+              );
+              if (missingRequiredParam) {
+                addDisabled = true;
+                addDisabledReason = `Set ${missingRequiredParam[0]} before ${actionLabel}.`;
+              }
             }
           } else if (!hasInstructions) {
             addDisabled = true;

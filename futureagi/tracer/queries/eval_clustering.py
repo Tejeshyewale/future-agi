@@ -13,6 +13,7 @@ import re
 from typing import List, Optional, Tuple
 
 import structlog
+from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
@@ -231,6 +232,34 @@ def _extract_title(explanation: str) -> str:
     return first_line[:200] if first_line else text[:200]
 
 
+def _eval_cluster_title(eval_name: str, reasoning: str) -> str:
+    """Sentry-style cluster title via the cheap-LLM EE helper, with a
+    deterministic fallback.
+
+    EE absent (OSS) or any LLM failure → the first-sentence extraction.
+    A title is low-stakes; it must never break cluster creation.
+    """
+    try:
+        from ee.agenthub.trace_scanner.eval_cluster_title import (
+            generate_eval_cluster_title,
+        )
+    except ImportError:
+        if settings.DEBUG:
+            logger.warning(
+                "Could not import ee.agenthub.trace_scanner.eval_cluster_title",
+                exc_info=True,
+            )
+        return _extract_title(reasoning)
+
+    try:
+        title = generate_eval_cluster_title(eval_name, reasoning)
+    except Exception:
+        logger.warning("eval_cluster_title_llm_failed", exc_info=True)
+        title = None
+
+    return title or _extract_title(reasoning)
+
+
 # ---------------------------------------------------------------------------
 # Cluster creation
 # ---------------------------------------------------------------------------
@@ -259,7 +288,7 @@ def create_cluster(
         ).hexdigest()[:8]
         cluster_id = f"E-{h2.upper()}"
 
-    title = _extract_title(result.explanation)
+    title = _eval_cluster_title(result.eval_name, result.explanation)
 
     cluster = TraceErrorGroup.objects.create(
         project_id=project_id,
