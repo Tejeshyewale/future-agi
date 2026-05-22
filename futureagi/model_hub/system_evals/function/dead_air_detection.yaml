@@ -16,16 +16,22 @@ config:
   - input_audio
   output: Pass/Fail
   eval_type_id: CustomCodeEval
-  config:
+  config: {}
+  function_params_schema:
     dead_air_threshold:
       type: number
       default: 20.0
+      minimum: 0
+      maximum: 100
     gap_threshold_ms:
       type: number
       default: 3000
+      minimum: 0
     silence_threshold:
       type: number
       default: 0.01
+      minimum: 0
+      maximum: 1
   config_params_desc:
     input_audio: The conversation audio to analyse (URL, data URI, or file path)
     dead_air_threshold: Maximum acceptable dead-air percentage (% of total audio duration)
