@@ -16,6 +16,7 @@ from model_hub.models.choices import StatusType
 from model_hub.models.evals_metric import EvalTemplate
 from model_hub.tasks.user_evaluation import trigger_error_localization_for_span
 from sdk.utils.helpers import _get_api_call_type
+from tfc.constants.api_calls import APICallStatusChoices
 from tfc.temporal import temporal_activity
 from tracer.models.custom_eval_config import CustomEvalConfig, EvalOutputType
 from tracer.models.eval_task import EvalTask
@@ -25,10 +26,6 @@ from tracer.models.trace_session import TraceSession
 from tracer.utils.helper import FieldConfig, get_default_trace_config
 from tracer.views.project import get_default_project_version_config
 
-try:
-    from ee.usage.models.usage import APICallStatusChoices
-except ImportError:
-    APICallStatusChoices = None
 try:
     from ee.usage.utils.usage_entries import log_and_deduct_cost_for_api_request
 except ImportError:
