@@ -17,9 +17,15 @@ from model_hub.models.evals_metric import EvalTemplate
 from sdk.utils.helpers import _get_api_call_type
 from tfc.constants.api_calls import APICallStatusChoices
 from tfc.temporal import temporal_activity
+from tfc.utils.case import to_camel_case, to_snake_case
 from tracer.models.custom_eval_config import CustomEvalConfig, EvalOutputType
 from tracer.models.eval_task import EvalTask
-from tracer.models.observation_span import EvalLogger, EvalTargetType, ObservationSpan
+from tracer.models.observation_span import (
+    EvalLogger,
+    EvalTargetType,
+    ObservationSpan,
+    ObservationType,
+)
 from tracer.models.trace import Trace
 from tracer.models.trace_session import TraceSession
 from tracer.utils.helper import FieldConfig, get_default_trace_config
@@ -65,6 +71,43 @@ def _walk_dotted_path(root, path):
                 return None
         else:
             return None
+    return current
+
+
+def _walk_raw_log(raw_log: dict, path: str):
+    """Walk raw_log with snake_case ↔ camelCase coercion per segment.
+
+    Voice-only fallback in ``_process_mapping``. Bridges FE picker
+    snake_case paths (``messages.0.end_time``) to vapi/retell camelCase
+    keys (``endTime``). Returns ``_MISSING`` on miss — distinguishing
+    that from a legitimate ``None`` matters because voice transcripts
+    store real ``null`` for fields like ``duration``/``metadata``.
+    """
+    if not isinstance(path, str) or not path:
+        return _MISSING
+
+    current = raw_log
+    for part in path.split("."):
+        if isinstance(current, list):
+            try:
+                current = current[int(part)]
+            except (ValueError, IndexError):
+                return _MISSING
+            continue
+        if not isinstance(current, dict):
+            return _MISSING
+        if part in current:
+            current = current[part]
+            continue
+        camel = to_camel_case(part)
+        if camel != part and camel in current:
+            current = current[camel]
+            continue
+        snake = to_snake_case(part)
+        if snake != part and snake in current:
+            current = current[snake]
+            continue
+        return _MISSING
     return current
 
 
@@ -444,6 +487,20 @@ def _process_mapping(
             model_val = getattr(span, attribute, _MISSING)
             if model_val is not _MISSING:
                 resolved_value = model_val
+
+        # Voice raw_log fallback: paths the BE response builder normalizes
+        # from raw_log at API time (messages.<n>.*, started_at, …) but
+        # never persists as flat span_attributes. Gated on observation_type
+        # so non-voice spans are unaffected. See _walk_raw_log.
+        if (
+            resolved_value is _MISSING
+            and span.observation_type == ObservationType.CONVERSATION
+        ):
+            raw_log = span_attrs.get("raw_log")
+            if isinstance(raw_log, dict):
+                walked = _walk_raw_log(raw_log, attribute)
+                if walked is not _MISSING:
+                    resolved_value = walked
 
         if resolved_value is not _MISSING:
             if isinstance(resolved_value, str):
