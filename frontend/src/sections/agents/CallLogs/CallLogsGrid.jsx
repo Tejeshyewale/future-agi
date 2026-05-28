@@ -286,28 +286,17 @@ const CallLogsGrid = React.forwardRef(function CallLogsGrid(
       if (c.groupBy === "Custom Columns") customCols.push(c);
     });
 
-    // Sort to follow columnVisibility — otherwise reorders snap back.
     const updated = callLogsColumnDefs
-      .map((col) => {
-        if (col.field && col.field in visMap) {
-          return { ...col, hide: !visMap[col.field] };
-        }
-        return col;
-      })
-      .map((d, i) => ({ d, i }))
+      .map((col) => ({
+        ...col,
+        ...(col.field &&
+          col.field in visMap && { hide: !visMap[col.field] }),
+      }))
       .sort((a, b) => {
-        const ai =
-          a.d.field && orderIndex.has(a.d.field)
-            ? orderIndex.get(a.d.field)
-            : Infinity;
-        const bi =
-          b.d.field && orderIndex.has(b.d.field)
-            ? orderIndex.get(b.d.field)
-            : Infinity;
-        if (ai === bi) return a.i - b.i;
+        const ai = orderIndex.get(a?.field) ?? Infinity;
+        const bi = orderIndex.get(b?.field) ?? Infinity;
         return ai - bi;
-      })
-      .map(({ d }) => d);
+      });
 
     // Add column defs for custom columns not already in the grid
     const existingFields = new Set(callLogsColumnDefs.map((c) => c.field));
@@ -387,7 +376,7 @@ const CallLogsGrid = React.forwardRef(function CallLogsGrid(
         next.length === cols.length &&
         next.every(
           (c, i) =>
-            (c.field || c.id) === (cols[i].field || cols[i].id),
+            (c?.field || c?.id) === (cols[i]?.field || cols[i]?.id),
         );
       if (!sameOrder) onColumnsChange(next);
     },

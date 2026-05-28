@@ -249,7 +249,6 @@ const SessionGrid = React.forwardRef(
                 const dedupedPending = pending.filter(
                   (c) => !existingIds.has(c.id),
                 );
-                // Diff by ID set — order isn't a schema change (TH-4996).
                 const newIds = new Set(newCols.map((c) => c.id));
                 const currentIdSet = new Set(currentNonCustom.map((c) => c.id));
                 const idSetChanged =
