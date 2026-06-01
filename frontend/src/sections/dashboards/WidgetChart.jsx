@@ -42,7 +42,6 @@ function getApexType(chartType) {
   return map[chartType] || "line";
 }
 
-// ← CHANGE 1: shareToken prop added
 export default function WidgetChart({ widget, globalDateRange, shareToken }) {
   const theme = useTheme();
   const queryMutation = useDashboardQuery();
@@ -100,7 +99,7 @@ export default function WidgetChart({ widget, globalDateRange, shareToken }) {
     [queryConfig],
   );
 
-  // ← CHANGE 2: shareToken passed to mutate so unauthenticated requests work
+  // Pass share_token for unauthenticated shared-dashboard access
   useEffect(() => {
     if (queryConfig?.metrics?.length > 0) {
       queryMutation.mutate(

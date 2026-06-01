@@ -8,28 +8,9 @@ import {
   Typography,
 } from "@mui/material";
 import WidgetChart from "./WidgetChart";
+import { computeRows } from "./widgetUtils";
 
 const DEFAULT_WIDGET_HEIGHT = 320;
-
-function computeRows(widgets) {
-  const sorted = [...widgets].sort((a, b) => a.position - b.position);
-  const rows = [];
-  let currentRow = [];
-  let rowWidth = 0;
-  for (const w of sorted) {
-    const width = w.width || 12;
-    if (rowWidth + width > 12 && currentRow.length > 0) {
-      rows.push(currentRow);
-      currentRow = [{ ...w, width }];
-      rowWidth = width;
-    } else {
-      currentRow.push({ ...w, width });
-      rowWidth += width;
-    }
-  }
-  if (currentRow.length > 0) rows.push(currentRow);
-  return rows;
-}
 
 export default function DashboardReadOnlyView({ dashboard, shareToken }) {
   if (!dashboard) return null;
